@@ -42,7 +42,7 @@ def compute_gradients(X,Y,W1,b1,W2,b2,lambd,dropout=False,drop_prob=0.5):
     grad_b2=np.sum(G,axis=1).reshape(-1,1)
     grad_W2=np.dot(G,h.T)
     G=np.dot(W2.T,G)
-    G=G*np.where(s1>0,1,0)
+    G=G*np.where(h>0,1,0)
     grad_b1=np.sum(G,axis=1).reshape(-1,1)
     grad_W1=np.dot(G,X.T)
     grad_b1/=(n)
@@ -51,10 +51,10 @@ def compute_gradients(X,Y,W1,b1,W2,b2,lambd,dropout=False,drop_prob=0.5):
     grad_W2 /= (n)
     return grad_W1+2*lambd*W1,grad_b1,grad_W2+2*lambd*W2,grad_b2
 
-def compute_gradients_Leaky(X,Y,W1,b1,W2,b2,lambd):
+def compute_gradients_Leaky(X,Y,W1,b1,W2,b2,lambd,dropout=False,drop_prob=0.5):
     '''compute the analytical gradients'''
     n=np.shape(X)[1]
-    P,h,s1=evaluate_classifier_Leaky(X,W1,b1,W2,b2)
+    P,h,s1=evaluate_classifier_Leaky(X,W1,b1,W2,b2,dropout,drop_prob)
     grad_b2=np.zeros(np.shape(b2))#(K,1)
     grad_W2=np.zeros((np.shape(W2)))#(K,m)
     grad_b1 = np.zeros(np.shape(b1))# (m,1)
@@ -63,7 +63,7 @@ def compute_gradients_Leaky(X,Y,W1,b1,W2,b2,lambd):
     grad_b2=np.sum(G,axis=1).reshape(-1,1)
     grad_W2=np.dot(G,h.T)
     G=np.dot(W2.T,G)
-    G=G*np.where(s1>0,1,0.1)
+    G=G*np.where(h>0,1,0.1)*np.where(h==0,0,1)
     grad_b1=np.sum(G,axis=1).reshape(-1,1)
     grad_W1=np.dot(G,X.T)
     grad_b1/=(n)
@@ -215,10 +215,13 @@ def evaluate_classifier(X,W1,b1,W2,b2,Dropout=False,drop_prob=0.5):
     s=np.dot(W2,h)+b2
     return softmax(s),h,s1
 
-def evaluate_classifier_Leaky(X,W1,b1,W2,b2):
+def evaluate_classifier_Leaky(X,W1,b1,W2,b2,Dropout=False,drop_prob=0.5):
     '''classification function Softmax(WX+b)'''
     s1=np.dot(W1,X)+b1
     h=np.maximum(0.1*s1,s1)
+    if Dropout:
+        u1 = np.random.binomial(1, drop_prob, size=h.shape) / drop_prob
+        h*=u1
     s=np.dot(W2,h)+b2
     return softmax(s),h,s1
 
@@ -341,9 +344,9 @@ def mini_batch_gd(X,Y,y,X_valid,Y_valid,y_valid,n_batch,eta,n_epochs,W1,b1,W2,b2
                     if np.random.random()>rand_jitt:
                         X_batch[:,i]=flip_img(X_batch[:,i])
             if Leaky:
-                grad_W1, grad_b1, grad_W2, grad_b2 = compute_gradients_Leaky(X_batch, Y_batch, W1, b1, W2, b2, lambd)
+                grad_W1, grad_b1, grad_W2, grad_b2 = compute_gradients_Leaky(X_batch, Y_batch, W1, b1, W2, b2, lambd,dropout,drop_prob)
             else:
-                grad_W1,grad_b1, grad_W2,grad_b2=compute_gradients(X_batch,Y_batch,W1,b1,W2,b2,lambd)
+                grad_W1,grad_b1, grad_W2,grad_b2=compute_gradients(X_batch,Y_batch,W1,b1,W2,b2,lambd,dropout,drop_prob)
             if momentum:
                 mom_W1=rho*mom_W1+eta*grad_W1
                 mom_b1=rho*mom_b1+eta*grad_b1
@@ -371,7 +374,6 @@ def mini_batch_gd(X,Y,y,X_valid,Y_valid,y_valid,n_batch,eta,n_epochs,W1,b1,W2,b2
             accuracy.append(compute_accuracy(X,y,W1,b1,W2,b2))#accuracy for training set
             cost.append(compute_cost(X,Y,W1,b1,W2,b2,lambd))#cost for training set
 
-            #The function on validation use global variables!!!
             a = compute_accuracy(X_valid, y_valid, W1, b1, W2, b2)
             valid_accuracy.append(a)
             valid_cost.append(compute_cost(X_valid,Y_valid,W1,b1,W2,b2,lambd))#cost for validation set
@@ -419,7 +421,27 @@ def mini_batch_gd(X,Y,y,X_valid,Y_valid,y_valid,n_batch,eta,n_epochs,W1,b1,W2,b2
 def softmax(S):
     return np.exp(S)/np.sum(np.exp(S),axis=0)
 
-load=True #1: load one batch, 0: load whole data set
+# PARAMETERS HERE #######################
+HE=True #use or not He initialization
+lambd=0.002620036321987215169 # regularization term
+h=1e-5 #for checking gradients
+n_batch=100 #number of batch in the training process
+eta=0.0841490501602296056 #leraning rate
+n_epochs=500 #maximum number of epochs to use
+rho=0.9 #momentum factor
+momentum=True #use momentum or not
+w_d=True #use weight decay or not --> each epoch *0.92
+Leaky=True #To use Leaky Relu
+early_stopping=True #To use early stopping
+n_early=40 #number of iteration without improvement before early stopping
+rand_jitt=0.5 #probability of flipping image
+random_jitt=True #to flip images during training
+m=100 #number of hidden nodes
+dropout=False #To use dropout
+drop_prob=0.5 #probability of activating a unit
+load=True #False: load one batch, True: load whole data set
+########################################
+
 if not load:
     X,Y,y=load_batch('cifar-10-batches-py/data_batch_1')
     X_valid,Y_valid,y_valid=load_batch('cifar-10-batches-py/data_batch_2')
@@ -427,23 +449,6 @@ else:
     X,Y,y,X_valid,Y_valid,y_valid=load_all()
 X_test,Y_test,y_test=load_batch('cifar-10-batches-py/test_batch')
 
-HE=False
-lambd=0.002620036321987215169
-h=1e-5
-n_batch=100
-eta=0.0841490501602296056
-n_epochs=300
-rho=0.9
-momentum=True
-w_d=True
-Leaky=False
-early_stopping=True
-n_early=30
-rand_jitt=0.5
-random_jitt=False
-m=50 #number of nodes
-dropout=True
-drop_prob=0.5
 
 
 X_mean=np.mean(X,axis=1).reshape(-1,1)
